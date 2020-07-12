@@ -23,6 +23,9 @@ import java.util.Collection;
 import java.util.Objects;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.EnumMap;
+import java.util.Map;
+import java.lang.reflect.Field;
 
 import com.google.common.collect.ImmutableList;
 
@@ -33,6 +36,8 @@ import net.minecraft.world.biome.Biomes;
 import net.fabricmc.fabric.api.biomes.v1.FabricBiomes;
 import net.fabricmc.fabric.api.biomes.v1.OverworldBiomes;
 import net.fabricmc.fabric.api.biomes.v1.OverworldClimate;
+import net.fabricmc.fabric.impl.biome.InternalBiomeData;
+import net.fabricmc.fabric.impl.biome.WeightedBiomePicker;
 
 public class BiomeManager {
 	public static void addSpawnBiome(Biome biome) {
@@ -50,6 +55,21 @@ public class BiomeManager {
 
 	public enum BiomeType {
 		DESERT, WARM, COOL, ICY;
+
+		private static BiomeType getType(OverworldClimate climate) {
+			switch (climate) {
+			case DRY:
+				return BiomeType.DESERT;
+			case TEMPERATE:
+				return BiomeType.WARM;
+			case COOL:
+				return BiomeType.COOL;
+			case SNOWY:
+				return BiomeType.ICY;
+			default:
+				throw new IllegalStateException("Someone's been tampering with the BiomeType enum!");
+			}
+		}
 
 		private OverworldClimate getClimate() {
 			switch (this) {
@@ -85,7 +105,43 @@ public class BiomeManager {
 	}
 
 	// Biomes O' Plenty pokes Forge internals. Fun
-	private static TrackedList<BiomeEntry>[] biomes = setupBiomes();
+	private static TrackedList<BiomeEntry>[] biomes;
+
+	static {
+		try {
+			setupBiomesField();
+		} catch (Exception e) {
+			throw new ExceptionInInitializerError(e);
+		}
+	}
+
+	private static void setupBiomesField() throws NoSuchFieldException, ClassNotFoundException, IllegalAccessException {
+		biomes = setupBiomes();
+
+		Field pickersField = InternalBiomeData.class.getDeclaredField("OVERWORLD_MODDED_CONTINENTAL_BIOME_PICKERS");
+		pickersField.setAccessible(true);
+		Field entriesField = WeightedBiomePicker.class.getDeclaredField("entries");
+		entriesField.setAccessible(true);
+		Class<?> continentalBiomeEntryClass = Class.forName("net.fabricmc.fabric.impl.biome.ContinentalBiomeEntry");
+		Field biomeField = continentalBiomeEntryClass.getDeclaredField("biome");
+		biomeField.setAccessible(true);
+		Field weightField = continentalBiomeEntryClass.getDeclaredField("weight");
+		weightField.setAccessible(true);
+
+		EnumMap<OverworldClimate, WeightedBiomePicker> pickers = (EnumMap<OverworldClimate, WeightedBiomePicker>) pickersField.get(null);
+
+		for (Map.Entry<OverworldClimate, WeightedBiomePicker> entry : pickers.entrySet()) {
+			BiomeType type = BiomeType.getType(entry.getKey());
+			WeightedBiomePicker picker = entry.getValue();
+			List<?> entries = (List<?>) entriesField.get(picker);
+
+			for (Object biomeEntry : entries) {
+				Biome biome = (Biome) biomeField.get(biomeEntry);
+				double weight = (double) weightField.get(biomeEntry) * 10.0;
+				biomes[type.ordinal()].add(new BiomeEntry(biome, (int) weight));
+			}
+		}
+	}
 
 	private static TrackedList<BiomeEntry>[] setupBiomes() {
 		@SuppressWarnings("unchecked")

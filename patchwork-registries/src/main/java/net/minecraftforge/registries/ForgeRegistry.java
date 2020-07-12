@@ -300,7 +300,7 @@ public class ForgeRegistry<V extends IForgeRegistryEntry<V>> implements
 	 * Users should only ever register things in the Register<?> events!
 	 */
 	public void freeze() {
-		this.isFrozen = true;
+		//this.isFrozen = true;
 	}
 
 	public void unfreeze() {
